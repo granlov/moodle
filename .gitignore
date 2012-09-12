@@ -26,3 +26,4 @@ CVS
 /.buildpath
 /.cache
 phpunit.xml
+/blocks/quickmail/
