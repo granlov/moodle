@@ -201,9 +201,9 @@ class core_files_renderer extends plugin_renderer_base {
     <div class="fp-navbar">
         <div class="filemanager-toolbar">
             <div class="fp-toolbar">
-                <div class="{!}fp-btn-add"><a href="#"><img src="'.$this->pix_url('a/add_file').'" /> '.$straddfile.'</a></div>
-                <div class="{!}fp-btn-mkdir"><a href="#"><img src="'.$this->pix_url('a/create_folder').'" /> '.$strmakedir.'</a></div>
-                <div class="{!}fp-btn-download"><a href="#"><img src="'.$this->pix_url('a/download_all').'" /> '.$strdownload.'</a></div>
+                <div class="{!}fp-btn-add"><a href="#"><img src="'.$this->pix_url('a/add_file').'" alt="" /> '.$straddfile.'</a></div>
+                <div class="{!}fp-btn-mkdir"><a href="#"><img src="'.$this->pix_url('a/create_folder').'" alt="" /> '.$strmakedir.'</a></div>
+                <div class="{!}fp-btn-download"><a href="#"><img src="'.$this->pix_url('a/download_all').'" alt="" /> '.$strdownload.'</a></div>
             </div>
             <div class="{!}fp-viewbar">
                 <a class="{!}fp-vb-icons" href="#"></a>
