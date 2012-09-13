@@ -27,3 +27,5 @@ CVS
 /.cache
 phpunit.xml
 /blocks/quickmail/
+/mod/journal/
+/config.php
