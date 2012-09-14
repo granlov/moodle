@@ -28,4 +28,5 @@ CVS
 phpunit.xml
 /blocks/quickmail/
 /mod/journal/
+/mod/dialogue/
 /config.php
