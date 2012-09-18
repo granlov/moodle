@@ -29,4 +29,6 @@ phpunit.xml
 /blocks/quickmail/
 /mod/journal/
 /mod/dialogue/
+/question/type/pmatch/
+/question/type/pmatchjme/
 /config.php
