@@ -31,4 +31,5 @@ phpunit.xml
 /mod/dialogue/
 /question/type/pmatch/
 /question/type/pmatchjme/
+/plagiarism/urkund/
 /config.php
