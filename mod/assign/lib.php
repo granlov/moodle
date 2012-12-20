@@ -31,7 +31,7 @@ defined('MOODLE_INTERNAL') || die();
  * @param mod_assign_mod_form $form
  * @return int The instance id of the new assignment
  */
-function assign_add_instance(stdClass $data, mod_assign_mod_form $form) {
+function assign_add_instance(stdClass $data, mod_assign_mod_form $form = null) {
     global $CFG;
     require_once($CFG->dirroot . '/mod/assign/locallib.php');
 
@@ -52,6 +52,72 @@ function assign_delete_instance($id) {
 
     $assignment = new assign($context, null, null);
     return $assignment->delete_instance();
+}
+
+/**
+ * This function is used by the reset_course_userdata function in moodlelib.
+ * This function will remove all assignment submissions and feedbacks in the database
+ * and clean up any related data.
+ * @param $data the data submitted from the reset course.
+ * @return array status array
+ */
+function assign_reset_userdata($data) {
+    global $CFG, $DB;
+    require_once($CFG->dirroot . '/mod/assign/locallib.php');
+
+    $status = array();
+    $params = array('courseid'=>$data->courseid);
+    $sql = "SELECT a.id FROM {assign} a WHERE a.course=:courseid";
+    $course = $DB->get_record('course', array('id'=> $data->courseid), '*', MUST_EXIST);
+    if ($assigns = $DB->get_records_sql($sql,$params)) {
+        foreach ($assigns as $assign) {
+            $cm = get_coursemodule_from_instance('assign', $assign->id, $data->courseid, false, MUST_EXIST);
+            $context = context_module::instance($cm->id);
+            $assignment = new assign($context, $cm, $course);
+            $status = array_merge($status, $assignment->reset_userdata($data));
+        }
+    }
+    return $status;
+}
+
+/**
+ * Removes all grades from gradebook
+ *
+ * @param int $courseid The ID of the course to reset
+ * @param string $type Optional type of assignment to limit the reset to a particular assignment type
+ */
+function assign_reset_gradebook($courseid, $type='') {
+    global $CFG, $DB;
+
+    $params = array('moduletype'=>'assign','courseid'=>$courseid);
+    $sql = 'SELECT a.*, cm.idnumber as cmidnumber, a.course as courseid
+            FROM {assign} a, {course_modules} cm, {modules} m
+            WHERE m.name=:moduletype AND m.id=cm.module AND cm.instance=a.id AND a.course=:courseid';
+
+    if ($assignments = $DB->get_records_sql($sql,$params)) {
+        foreach ($assignments as $assignment) {
+            assign_grade_item_update($assignment, 'reset');
+        }
+    }
+}
+
+/**
+ * Implementation of the function for printing the form elements that control
+ * whether the course reset functionality affects the assignment.
+ * @param $mform form passed by reference
+ */
+function assign_reset_course_form_definition(&$mform) {
+    $mform->addElement('header', 'assignheader', get_string('modulenameplural', 'assign'));
+    $mform->addElement('advcheckbox', 'reset_assign_submissions', get_string('deleteallsubmissions','assign'));
+}
+
+/**
+ * Course reset form defaults.
+ * @param  object $course
+ * @return array
+ */
+function assign_reset_course_form_defaults($course) {
+    return array('reset_assign_submissions'=>1);
 }
 
 /**
@@ -782,7 +848,9 @@ function assign_get_user_grades($assign, $userid=0) {
     global $CFG;
     require_once($CFG->dirroot . '/mod/assign/locallib.php');
 
-    $assignment = new assign(null, null, null);
+    $cm = get_coursemodule_from_instance('assign', $assign->id, 0, false, MUST_EXIST);
+    $context = context_module::instance($cm->id);
+    $assignment = new assign($context, null, null);
     $assignment->set_instance($assign);
     return $assignment->get_user_grades_for_gradebook($userid);
 }

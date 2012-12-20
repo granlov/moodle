@@ -92,7 +92,7 @@ class assignfeedback_offline_import_grades_form extends moodleform implements re
             $modified = $record->modified;
             $userdesc = fullname($user);
             if ($assignment->is_blind_marking()) {
-                $userdesc = get_string('hiddenuser', 'assign') . $assignment->get_unique_id_for_user($user->id);
+                $userdesc = get_string('hiddenuser', 'assign') . $assignment->get_uniqueid_for_user($user->id);
             }
 
             $usergrade = $assignment->get_user_grade($user->id, false);
@@ -122,6 +122,11 @@ class assignfeedback_offline_import_grades_form extends moodleform implements re
                 $skip = true;
             } else if ($assignment->grading_disabled($user->id)) {
                 // Skip grade is locked.
+                $skip = true;
+            } else if (!is_numeric($gradedesc) && ($assignment->get_instance()->grade) > -1) {
+                $skip = true;
+            } else if (($assignment->get_instance()->grade > -1) &&
+                      (($gradedesc < 0) || ($gradedesc > $assignment->get_instance()->grade))) {
                 $skip = true;
             }
 

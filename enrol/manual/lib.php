@@ -26,6 +26,9 @@ defined('MOODLE_INTERNAL') || die();
 
 class enrol_manual_plugin extends enrol_plugin {
 
+    protected $lasternoller = null;
+    protected $lasternollerinstanceid = 0;
+
     public function roles_protected() {
         // Users may tweak the roles later.
         return false;
@@ -110,7 +113,7 @@ class enrol_manual_plugin extends enrol_plugin {
 
         if (has_capability('enrol/manual:manage', $context)) {
             $managelink = new moodle_url("/enrol/manual/manage.php", array('enrolid'=>$instance->id));
-            $icons[] = $OUTPUT->action_icon($managelink, new pix_icon('i/users', get_string('enrolusers', 'enrol_manual'), 'core', array('class'=>'iconsmall')));
+            $icons[] = $OUTPUT->action_icon($managelink, new pix_icon('t/enrolusers', get_string('enrolusers', 'enrol_manual'), 'core', array('class'=>'iconsmall')));
         }
         if (has_capability('enrol/manual:config', $context)) {
             $editlink = new moodle_url("/enrol/manual/edit.php", array('courseid'=>$instance->courseid));
@@ -147,7 +150,21 @@ class enrol_manual_plugin extends enrol_plugin {
      * @return int id of new instance, null if can not be created
      */
     public function add_default_instance($course) {
-        $fields = array('status'=>$this->get_config('status'), 'enrolperiod'=>$this->get_config('enrolperiod', 0), 'roleid'=>$this->get_config('roleid', 0));
+        $expirynotify = $this->get_config('expirynotify', 0);
+        if ($expirynotify == 2) {
+            $expirynotify = 1;
+            $notifyall = 1;
+        } else {
+            $notifyall = 0;
+        }
+        $fields = array(
+            'status'          => $this->get_config('status'),
+            'roleid'          => $this->get_config('roleid', 0),
+            'enrolperiod'     => $this->get_config('enrolperiod', 0),
+            'expirynotify'    => $expirynotify,
+            'notifyall'       => $notifyall,
+            'expirythreshold' => $this->get_config('expirythreshold', 86400),
+        );
         return $this->add_instance($course, $fields);
     }
 
@@ -255,6 +272,140 @@ class enrol_manual_plugin extends enrol_plugin {
         $button->strings_for_js('startingfrom', 'moodle');
 
         return $button;
+    }
+
+    /**
+     * Enrol cron support.
+     * @return void
+     */
+    public function cron() {
+        $this->sync(null, true);
+        $this->send_expiry_notifications(true);
+    }
+
+    /**
+     * Sync all meta course links.
+     *
+     * @param int $courseid one course, empty mean all
+     * @param bool $verbose verbose CLI output
+     * @return int 0 means ok, 1 means error, 2 means plugin disabled
+     */
+    public function sync($courseid = null, $verbose = false) {
+        global $DB;
+
+        if (!enrol_is_enabled('manual')) {
+            return 2;
+        }
+
+        // Unfortunately this may take a long time, execution can be interrupted safely here.
+        @set_time_limit(0);
+        raise_memory_limit(MEMORY_HUGE);
+
+        if ($verbose) {
+            mtrace('Verifying manual enrolment expiration...');
+        }
+
+        $params = array('now'=>time(), 'useractive'=>ENROL_USER_ACTIVE, 'courselevel'=>CONTEXT_COURSE);
+        $coursesql = "";
+        if ($courseid) {
+            $coursesql = "AND e.courseid = :courseid";
+            $params['courseid'] = $courseid;
+        }
+
+        // Deal with expired accounts.
+        $action = $this->get_config('expiredaction', ENROL_EXT_REMOVED_KEEP);
+
+        if ($action == ENROL_EXT_REMOVED_UNENROL) {
+            $instances = array();
+            $sql = "SELECT ue.*, e.courseid, c.id AS contextid
+                      FROM {user_enrolments} ue
+                      JOIN {enrol} e ON (e.id = ue.enrolid AND e.enrol = 'manual')
+                      JOIN {context} c ON (c.instanceid = e.courseid AND c.contextlevel = :courselevel)
+                     WHERE ue.timeend > 0 AND ue.timeend < :now
+                           $coursesql";
+            $rs = $DB->get_recordset_sql($sql, $params);
+            foreach ($rs as $ue) {
+                if (empty($instances[$ue->enrolid])) {
+                    $instances[$ue->enrolid] = $DB->get_record('enrol', array('id'=>$ue->enrolid));
+                }
+                $instance = $instances[$ue->enrolid];
+                // Always remove all manually assigned roles here, this may break enrol_self roles but we do not want hardcoded hacks here.
+                role_unassign_all(array('userid'=>$ue->userid, 'contextid'=>$ue->contextid, 'component'=>'', 'itemid'=>0), true);
+                $this->unenrol_user($instance, $ue->userid);
+                if ($verbose) {
+                    mtrace("  unenrolling expired user $ue->userid from course $instance->courseid");
+                }
+            }
+            $rs->close();
+            unset($instances);
+
+        } else if ($action == ENROL_EXT_REMOVED_SUSPENDNOROLES) {
+            $instances = array();
+            $sql = "SELECT ue.*, e.courseid, c.id AS contextid
+                      FROM {user_enrolments} ue
+                      JOIN {enrol} e ON (e.id = ue.enrolid AND e.enrol = 'manual')
+                      JOIN {context} c ON (c.instanceid = e.courseid AND c.contextlevel = :courselevel)
+                     WHERE ue.timeend > 0 AND ue.timeend < :now
+                           AND ue.status = :useractive
+                           $coursesql";
+            $rs = $DB->get_recordset_sql($sql, $params);
+            foreach ($rs as $ue) {
+                if (empty($instances[$ue->enrolid])) {
+                    $instances[$ue->enrolid] = $DB->get_record('enrol', array('id'=>$ue->enrolid));
+                }
+                $instance = $instances[$ue->enrolid];
+                // Always remove all manually assigned roles here, this may break enrol_self roles but we do not want hardcoded hacks here.
+                role_unassign_all(array('userid'=>$ue->userid, 'contextid'=>$ue->contextid, 'component'=>'', 'itemid'=>0), true);
+                $this->update_user_enrol($instance, $ue->userid, ENROL_USER_SUSPENDED);
+                if ($verbose) {
+                    mtrace("  suspending expired user $ue->userid in course $instance->courseid");
+                }
+            }
+            $rs->close();
+            unset($instances);
+
+        } else {
+            // ENROL_EXT_REMOVED_KEEP means no changes.
+        }
+
+        if ($verbose) {
+            mtrace('...manual enrolment updates finished.');
+        }
+
+        return 0;
+    }
+
+    /**
+     * Returns the user who is responsible for manual enrolments in given instance.
+     *
+     * Usually it is the first editing teacher - the person with "highest authority"
+     * as defined by sort_by_roleassignment_authority() having 'enrol/manual:manage'
+     * capability.
+     *
+     * @param int $instanceid enrolment instance id
+     * @return stdClass user record
+     */
+    protected function get_enroller($instanceid) {
+        global $DB;
+
+        if ($this->lasternollerinstanceid == $instanceid and $this->lasternoller) {
+            return $this->lasternoller;
+        }
+
+        $instance = $DB->get_record('enrol', array('id'=>$instanceid, 'enrol'=>$this->get_name()), '*', MUST_EXIST);
+        $context = context_course::instance($instance->courseid);
+
+        if ($users = get_enrolled_users($context, 'enrol/manual:manage')) {
+            $users = sort_by_roleassignment_authority($users, $context);
+            $this->lasternoller = reset($users);
+            unset($users);
+        } else {
+            $this->lasternoller = parent::get_enroller($instanceid);
+        }
+
+        $this->lasternollerinstanceid = $instanceid;
+
+        return $this->lasternoller;
     }
 
     /**
@@ -379,5 +530,20 @@ class enrol_manual_plugin extends enrol_plugin {
         // This is necessary only because we may migrate other types to this instance,
         // we do not use component in manual or self enrol.
         role_assign($roleid, $userid, $contextid, '', 0);
+    }
+
+    /**
+     * Restore user group membership.
+     * @param stdClass $instance
+     * @param int $groupid
+     * @param int $userid
+     */
+    public function restore_group_member($instance, $groupid, $userid) {
+        global $CFG;
+        require_once("$CFG->dirroot/group/lib.php");
+
+        // This might be called when forcing restore as manual enrolments.
+
+        groups_add_member($groupid, $userid);
     }
 }

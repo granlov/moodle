@@ -254,8 +254,10 @@ class mod_assign_renderer extends plugin_renderer_base {
         if ($summary->submissionsenabled) {
             $this->add_table_row_tuple($t, get_string('numberofsubmittedassignments', 'assign'),
                                        $summary->submissionssubmittedcount);
-            $this->add_table_row_tuple($t, get_string('numberofsubmissionsneedgrading', 'assign'),
-                                       $summary->submissionsneedgradingcount);
+            if (!$summary->teamsubmission) {
+                $this->add_table_row_tuple($t, get_string('numberofsubmissionsneedgrading', 'assign'),
+                                           $summary->submissionsneedgradingcount);
+            }
         }
 
         $time = time();
@@ -541,7 +543,7 @@ class mod_assign_renderer extends plugin_renderer_base {
         // Show graders whether this submission is editable by students.
         if ($status->view == assign_submission_status::GRADER_VIEW) {
             $row = new html_table_row();
-            $cell1 = new html_table_cell(get_string('open', 'assign'));
+            $cell1 = new html_table_cell(get_string('editingstatus', 'assign'));
             if ($status->canedit) {
                 $cell2 = new html_table_cell(get_string('submissioneditable', 'assign'));
                 $cell2->attributes = array('class'=>'submissioneditable');
@@ -549,6 +551,8 @@ class mod_assign_renderer extends plugin_renderer_base {
                 $cell2 = new html_table_cell(get_string('submissionnoteditable', 'assign'));
                 $cell2->attributes = array('class'=>'submissionnoteditable');
             }
+            $row->cells = array($cell1, $cell2);
+            $t->data[] = $row;
         }
 
         // Grading criteria preview.
@@ -570,10 +574,11 @@ class mod_assign_renderer extends plugin_renderer_base {
             $t->data[] = $row;
 
             foreach ($status->submissionplugins as $plugin) {
+                $pluginshowsummary = !$plugin->is_empty($submission) || !$plugin->allow_submissions();
                 if ($plugin->is_enabled() &&
                     $plugin->is_visible() &&
                     $plugin->has_user_summary() &&
-                    !$plugin->is_empty($submission)) {
+                    $pluginshowsummary) {
 
                     $row = new html_table_row();
                     $cell1 = new html_table_cell($plugin->get_name());
@@ -632,12 +637,28 @@ class mod_assign_renderer extends plugin_renderer_base {
         $o = '';
 
         if ($submissionplugin->view == assign_submission_plugin_submission::SUMMARY) {
-            $icon = $this->output->pix_icon('t/preview', get_string('view' . substr($submissionplugin->plugin->get_subtype(), strlen('assign')), 'mod_assign'));
-            $link = '';
             $showviewlink = false;
             $summary = $submissionplugin->plugin->view_summary($submissionplugin->submission, $showviewlink);
+
+            $classsuffix = $submissionplugin->plugin->get_subtype() . '_' . $submissionplugin->plugin->get_type() . '_' . $submissionplugin->submission->id;
+            $o .= $this->output->box_start('boxaligncenter plugincontentsummary summary_' . $classsuffix);
+
+            $link = '';
             if ($showviewlink) {
-                $link = $this->output->action_link(
+                $previewstr = get_string('viewsubmission', 'assign');
+                $icon = $this->output->pix_icon('t/preview', $previewstr);
+
+                $expandstr = get_string('viewfull', 'assign');
+                $classes = 'expandsummaryicon expand_' . $classsuffix;
+                $o .= $this->output->pix_icon('t/switch_plus', $expandstr, null, array('class'=>$classes));
+
+                $jsparams = array($submissionplugin->plugin->get_subtype(),
+                                  $submissionplugin->plugin->get_type(),
+                                  $submissionplugin->submission->id);
+                $this->page->requires->js_init_call('M.mod_assign.init_plugin_summary', $jsparams);
+
+                $link .= '<noscript>';
+                $link .= $this->output->action_link(
                                 new moodle_url('/mod/assign/view.php',
                                                array('id' => $submissionplugin->coursemoduleid,
                                                      'sid'=>$submissionplugin->submission->id,
@@ -646,11 +667,23 @@ class mod_assign_renderer extends plugin_renderer_base {
                                                      'returnaction'=>$submissionplugin->returnaction,
                                                      'returnparams'=>http_build_query($submissionplugin->returnparams))),
                                 $icon);
+                $link .= '</noscript>';
 
                 $link .= $this->output->spacer(array('width'=>15));
             }
 
             $o .= $link . $summary;
+            $o .= $this->output->box_end();
+            if ($showviewlink) {
+                $o .= $this->output->box_start('boxaligncenter hidefull full_' . $classsuffix);
+                $classes = 'expandsummaryicon contract_' . $classsuffix;
+                $o .= $this->output->pix_icon('t/switch_minus',
+                                              get_string('viewsummary', 'assign'),
+                                              null,
+                                              array('class'=>$classes));
+                $o .= $submissionplugin->plugin->view($submissionplugin->submission);
+                $o .= $this->output->box_end();
+            }
         } else if ($submissionplugin->view == assign_submission_plugin_submission::FULL) {
             $o .= $this->output->box_start('boxaligncenter submissionfull');
             $o .= $submissionplugin->plugin->view($submissionplugin->submission);
@@ -699,12 +732,28 @@ class mod_assign_renderer extends plugin_renderer_base {
         $o = '';
 
         if ($feedbackplugin->view == assign_feedback_plugin_feedback::SUMMARY) {
-            $icon = $this->output->pix_icon('t/preview', get_string('view' . substr($feedbackplugin->plugin->get_subtype(), strlen('assign')), 'mod_assign'));
-            $link = '';
             $showviewlink = false;
             $summary = $feedbackplugin->plugin->view_summary($feedbackplugin->grade, $showviewlink);
+
+            $classsuffix = $feedbackplugin->plugin->get_subtype() . '_' . $feedbackplugin->plugin->get_type() . '_' . $feedbackplugin->grade->id;
+            $o .= $this->output->box_start('boxaligncenter plugincontentsummary summary_' . $classsuffix);
+
+            $link = '';
             if ($showviewlink) {
-                $link = $this->output->action_link(
+                $previewstr = get_string('viewfeedback', 'assign');
+                $icon = $this->output->pix_icon('t/preview', $previewstr);
+
+                $expandstr = get_string('viewfull', 'assign');
+                $classes = 'expandsummaryicon expand_' . $classsuffix;
+                $o .= $this->output->pix_icon('t/switch_plus', $expandstr, null, array('class'=>$classes));
+
+                $jsparams = array($feedbackplugin->plugin->get_subtype(),
+                                  $feedbackplugin->plugin->get_type(),
+                                  $feedbackplugin->grade->id);
+                $this->page->requires->js_init_call('M.mod_assign.init_plugin_summary', $jsparams);
+
+                $link .= '<noscript>';
+                $link .= $this->output->action_link(
                                 new moodle_url('/mod/assign/view.php',
                                                array('id' => $feedbackplugin->coursemoduleid,
                                                      'gid'=>$feedbackplugin->grade->id,
@@ -713,10 +762,23 @@ class mod_assign_renderer extends plugin_renderer_base {
                                                      'returnaction'=>$feedbackplugin->returnaction,
                                                      'returnparams'=>http_build_query($feedbackplugin->returnparams))),
                                 $icon);
+                $link .= '</noscript>';
+
                 $link .= $this->output->spacer(array('width'=>15));
             }
 
             $o .= $link . $summary;
+            $o .= $this->output->box_end();
+            if ($showviewlink) {
+                $o .= $this->output->box_start('boxaligncenter hidefull full_' . $classsuffix);
+                $classes = 'expandsummaryicon contract_' . $classsuffix;
+                $o .= $this->output->pix_icon('t/switch_minus',
+                                              get_string('viewsummary', 'assign'),
+                                              null,
+                                              array('class'=>$classes));
+                $o .= $feedbackplugin->plugin->view($feedbackplugin->grade);
+                $o .= $this->output->box_end();
+            }
         } else if ($feedbackplugin->view == assign_feedback_plugin_feedback::FULL) {
             $o .= $this->output->box_start('boxaligncenter feedbackfull');
             $o .= $feedbackplugin->plugin->view($feedbackplugin->grade);

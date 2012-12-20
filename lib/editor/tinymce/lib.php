@@ -27,7 +27,7 @@ defined('MOODLE_INTERNAL') || die();
 
 class tinymce_texteditor extends texteditor {
     /** @var string active version - this is the directory name where to find tinymce code */
-    public $version = '3.6.0';
+    public $version = '3.5.7b';
 
     /**
      * Is the current browser supported by this editor?
@@ -156,6 +156,7 @@ class tinymce_texteditor extends texteditor {
                 'searchreplace,paste,directionality,fullscreen,nonbreaking,contextmenu,' .
                 'insertdatetime,save,iespell,preview,print,noneditable,visualchars,' .
                 'xhtmlxtras,template,pagebreak',
+            'gecko_spellcheck' => true,
             'theme_advanced_font_sizes' => "1,2,3,4,5,6,7",
             'theme_advanced_layout_manager' => "SimpleLayout",
             'theme_advanced_toolbar_align' => "left",

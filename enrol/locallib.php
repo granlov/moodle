@@ -265,17 +265,16 @@ class course_enrolment_manager {
     }
 
     /**
-     * Gets an array of the users that can be enrolled in this course.
+     * Helper method used by {@link get_potential_users()} and {@link search_other_users()}.
      *
-     * @global moodle_database $DB
-     * @param int $enrolid
-     * @param string $search
-     * @param bool $searchanywhere
-     * @param int $page Defaults to 0
-     * @param int $perpage Defaults to 25
-     * @return array Array(totalusers => int, users => array)
+     * @param string $search the search term, if any.
+     * @param bool $searchanywhere Can the search term be anywhere, or must it be at the start.
+     * @return array with three elements:
+     *     string list of fields to SELECT,
+     *     string contents of SQL WHERE clause,
+     *     array query params. Note that the SQL snippets use named parameters.
      */
-    public function get_potential_users($enrolid, $search='', $searchanywhere=false, $page=0, $perpage=25) {
+    protected function get_basic_search_conditions($search, $searchanywhere) {
         global $DB, $CFG;
 
         // Add some additional sensible conditions
@@ -283,15 +282,17 @@ class course_enrolment_manager {
         $params = array('guestid' => $CFG->siteguest);
         if (!empty($search)) {
             $conditions = get_extra_user_fields($this->get_context());
-            $conditions[] = $DB->sql_concat('u.firstname', "' '", 'u.lastname');
+            $conditions[] = 'u.firstname';
+            $conditions[] = 'u.lastname';
+            $conditions[] = $DB->sql_fullname('u.firstname', 'u.lastname');
             if ($searchanywhere) {
                 $searchparam = '%' . $search . '%';
             } else {
                 $searchparam = $search . '%';
             }
             $i = 0;
-            foreach ($conditions as $key=>$condition) {
-                $conditions[$key] = $DB->sql_like($condition,":con{$i}00", false);
+            foreach ($conditions as $key => $condition) {
+                $conditions[$key] = $DB->sql_like($condition, ":con{$i}00", false);
                 $params["con{$i}00"] = $searchparam;
                 $i++;
             }
@@ -304,17 +305,61 @@ class course_enrolment_manager {
         $extrafields[] = 'lastaccess';
         $ufields = user_picture::fields('u', $extrafields);
 
+        return array($ufields, $params, $wherecondition);
+    }
+
+    /**
+     * Helper method used by {@link get_potential_users()} and {@link search_other_users()}.
+     *
+     * @param string $search the search string, if any.
+     * @param string $fields the first bit of the SQL when returning some users.
+     * @param string $countfields fhe first bit of the SQL when counting the users.
+     * @param string $sql the bulk of the SQL statement.
+     * @param array $params query parameters.
+     * @param int $page which page number of the results to show.
+     * @param int $perpage number of users per page.
+     * @return array with two elememts:
+     *      int total number of users matching the search.
+     *      array of user objects returned by the query.
+     */
+    protected function execute_search_queries($search, $fields, $countfields, $sql, array $params, $page, $perpage) {
+        global $DB, $CFG;
+
+        list($sort, $sortparams) = users_order_by_sql('u', $search, $this->get_context());
+        $order = ' ORDER BY ' . $sort;
+
+        $totalusers = $DB->count_records_sql($countfields . $sql, $params);
+        $availableusers = $DB->get_records_sql($fields . $sql . $order,
+                array_merge($params, $sortparams), $page*$perpage, $perpage);
+
+        return array('totalusers' => $totalusers, 'users' => $availableusers);
+    }
+
+    /**
+     * Gets an array of the users that can be enrolled in this course.
+     *
+     * @global moodle_database $DB
+     * @param int $enrolid
+     * @param string $search
+     * @param bool $searchanywhere
+     * @param int $page Defaults to 0
+     * @param int $perpage Defaults to 25
+     * @return array Array(totalusers => int, users => array)
+     */
+    public function get_potential_users($enrolid, $search='', $searchanywhere=false, $page=0, $perpage=25) {
+        global $DB;
+
+        list($ufields, $params, $wherecondition) = $this->get_basic_search_conditions($search, $searchanywhere);
+
         $fields      = 'SELECT '.$ufields;
         $countfields = 'SELECT COUNT(1)';
         $sql = " FROM {user} u
             LEFT JOIN {user_enrolments} ue ON (ue.userid = u.id AND ue.enrolid = :enrolid)
                 WHERE $wherecondition
                       AND ue.id IS NULL";
-        $order = ' ORDER BY u.lastname ASC, u.firstname ASC';
         $params['enrolid'] = $enrolid;
-        $totalusers = $DB->count_records_sql($countfields . $sql, $params);
-        $availableusers = $DB->get_records_sql($fields . $sql . $order, $params, $page*$perpage, $perpage);
-        return array('totalusers'=>$totalusers, 'users'=>$availableusers);
+
+        return $this->execute_search_queries($search, $fields, $countfields, $sql, $params, $page, $perpage);
     }
 
     /**
@@ -330,38 +375,17 @@ class course_enrolment_manager {
     public function search_other_users($search='', $searchanywhere=false, $page=0, $perpage=25) {
         global $DB, $CFG;
 
-        // Add some additional sensible conditions
-        $tests = array("u.id <> :guestid", 'u.deleted = 0', 'u.confirmed = 1');
-        $params = array('guestid'=>$CFG->siteguest);
-        if (!empty($search)) {
-            $conditions = array('u.firstname','u.lastname');
-            if ($searchanywhere) {
-                $searchparam = '%' . $search . '%';
-            } else {
-                $searchparam = $search . '%';
-            }
-            $i = 0;
-            foreach ($conditions as $key=>$condition) {
-                $conditions[$key] = $DB->sql_like($condition, ":con{$i}00", false);
-                $params["con{$i}00"] = $searchparam;
-                $i++;
-            }
-            $tests[] = '(' . implode(' OR ', $conditions) . ')';
-        }
-        $wherecondition = implode(' AND ', $tests);
+        list($ufields, $params, $wherecondition) = $this->get_basic_search_conditions($search, $searchanywhere);
 
-        $fields      = 'SELECT '.user_picture::fields('u', array('username','lastaccess'));
+        $fields      = 'SELECT ' . $ufields;
         $countfields = 'SELECT COUNT(u.id)';
         $sql   = " FROM {user} u
               LEFT JOIN {role_assignments} ra ON (ra.userid = u.id AND ra.contextid = :contextid)
                   WHERE $wherecondition
                     AND ra.id IS NULL";
-        $order = ' ORDER BY lastname ASC, firstname ASC';
-
         $params['contextid'] = $this->context->id;
-        $totalusers = $DB->count_records_sql($countfields . $sql, $params);
-        $availableusers = $DB->get_records_sql($fields . $sql . $order, $params, $page*$perpage, $perpage);
-        return array('totalusers'=>$totalusers, 'users'=>$availableusers);
+
+        return $this->execute_search_queries($search, $fields, $countfields, $sql, $params, $page, $perpage);
     }
 
     /**
@@ -621,6 +645,9 @@ class course_enrolment_manager {
         global $DB;
         require_capability('moodle/course:managegroups', $this->context);
         $group = $this->get_group($groupid);
+        if (!groups_remove_member_allowed($group, $user)) {
+            return false;
+        }
         if (!$group) {
             return false;
         }
@@ -787,13 +814,15 @@ class course_enrolment_manager {
 
         $users = array();
         foreach ($userroles as $userrole) {
+            $contextid = $userrole->contextid;
+            unset($userrole->contextid); // This would collide with user avatar.
             if (!array_key_exists($userrole->id, $users)) {
                 $users[$userrole->id] = $this->prepare_user_for_display($userrole, $extrafields, $now);
             }
             $a = new stdClass;
             $a->role = $roles[$userrole->roleid]->localname;
             $changeable = ($userrole->component == '');
-            if ($userrole->contextid == $this->context->id) {
+            if ($contextid == $this->context->id) {
                 $roletext = get_string('rolefromthiscourse', 'enrol', $a);
             } else {
                 $changeable = false;
@@ -1008,14 +1037,16 @@ class course_enrolment_manager {
         $userfields = user_picture::fields('u');
         list($idsql, $idparams) = $DB->get_in_or_equal($userids, SQL_PARAMS_NAMED, 'userid0000');
 
+        list($sort, $sortparams) = users_order_by_sql('u');
+
         $sql = "SELECT ue.id AS ueid, ue.status, ue.enrolid, ue.userid, ue.timestart, ue.timeend, ue.modifierid, ue.timecreated, ue.timemodified, $userfields
                   FROM {user_enrolments} ue
              LEFT JOIN {user} u ON u.id = ue.userid
                  WHERE ue.enrolid $instancesql AND
                        u.id $idsql
-              ORDER BY u.firstname ASC, u.lastname ASC";
+              ORDER BY $sort";
 
-        $rs = $DB->get_recordset_sql($sql, $idparams + $instanceparams);
+        $rs = $DB->get_recordset_sql($sql, $idparams + $instanceparams + $sortparams);
         $users = array();
         foreach ($rs as $ue) {
             $user = user_picture::unalias($ue);
