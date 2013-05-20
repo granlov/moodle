@@ -836,7 +836,8 @@ M.core_dock.genericblock.prototype = {
         }
 
         // Must set the image src seperatly of we get an error with XML strict headers
-        var moveto = Y.Node.create('<input type="image" class="moveto customcommand requiresjs" alt="'+M.str.block.addtodock+'" title="'+M.str.block.addtodock+'" />');
+        var moveto = Y.Node.create('<input type="image" class="moveto customcommand requiresjs" alt="'+M.str.block.addtodock+'" title="'+
+            Y.Escape.html(M.util.get_string('dockblock', 'block', node.one('.header .title h2').getHTML())) +'" />');
         var icon = 't/block_to_dock';
         if (right_to_left()) {
             icon = 't/block_to_dock_rtl';
@@ -906,7 +907,8 @@ M.core_dock.genericblock.prototype = {
         }
 
         // Must set the image src seperatly of we get an error with XML strict headers
-        var movetoimg = Y.Node.create('<img alt="'+M.str.block.undockitem+'" title="'+M.str.block.undockitem+'" />');
+        var movetoimg = Y.Node.create('<img alt="'+Y.Escape.html(M.str.block.undockitem)+'" title="'+
+            Y.Escape.html(M.util.get_string('undockblock', 'block', blocktitle.innerHTML)) +'" />');
         var icon = 't/dock_to_block';
         if (right_to_left()) {
             icon = 't/dock_to_block_rtl';
@@ -936,7 +938,7 @@ M.core_dock.genericblock.prototype = {
             }, this);
             // Add a close icon
             // Must set the image src seperatly of we get an error with XML strict headers
-            var closeicon = Y.Node.create('<span class="hidepanelicon" tabindex="0"><img alt="" /></span>');
+            var closeicon = Y.Node.create('<span class="hidepanelicon" tabindex="0"><img alt="'+M.str.block.hidepanel+'" title="'+M.str.block.hidedockpanel+'" /></span>');
             closeicon.one('img').setAttribute('src', M.util.image_url('t/dockclose', 'moodle'));
             closeicon.on('forceclose|click', this.hide, this);
             closeicon.on('dock:actionkey',this.hide, this, {actions:{enter:true,toggle:true}});
